@@ -1,0 +1,113 @@
+import numpy as np
+from keras.models import load_model
+import pandas as pd
+import tensorflow as tf
+from tensorflow import feature_column
+from tensorflow.keras import layers
+from sklearn.model_selection import train_test_split
+
+
+
+#读取数据
+
+dataframe = pd.read_csv('new_data.csv')
+
+#划分数据集
+train_and_val,test = train_test_split(dataframe,test_size=0.2)
+train,val = train_test_split(train_and_val,test_size=0.2)
+
+
+
+#将数据转化为机器可处理的数据
+def df_to_dataset(dataframe,shuffle =True,batch_size=32):
+    dataframeCopy=dataframe.copy()
+    dataframeCopy = dataframeCopy.dropna()
+    #标签值为：是否确诊NEC，1为是，2为否
+    labels=dataframeCopy.pop('result_NEC')
+
+    #切分数据集
+    ds=tf.data.Dataset.from_tensor_slices((dict(dataframeCopy),labels))
+    #乱序排列
+    if shuffle:
+        ds=ds.shuffle(buffer_size=len(dataframeCopy))
+    #切分数据集
+    ds=ds.batch(batch_size)
+    return ds
+
+
+#对数据进行转化
+batch_size=32
+train_ds=df_to_dataset(train,batch_size=batch_size)
+val_ds=df_to_dataset(val,shuffle=False,batch_size=batch_size)
+test_ds=df_to_dataset(test,shuffle=False,batch_size=batch_size)
+
+
+#数据预处理——onehot编码
+feature_columns=[]
+
+#二分类数据列进行普通onehot编码
+for header in ['Delivery_way','gender','Small_for_gestational_age','Maternal_hypertension','Maternal_diabetes',
+               'Adverse_reproductive_history','Premature_rupture_of_membranes','Placental_abruption',
+               'Placenta_previa','Prenatal_infection',
+               'Prenatal_use_of_antibiotics','Chorioamnitis','The_TORCH_infection','Congenital_heart_disease']:
+    feature_columns.append(feature_column.numeric_column(header))
+#多分类数据进行分类桶编码
+one_minute=feature_column.numeric_column('one_minutes')
+one_minute_buckets=feature_column.bucketized_column(one_minute,boundaries=[5,6,7,8,9,10,11])
+feature_columns.append(one_minute_buckets)
+
+five_minute=feature_column.numeric_column('five_minutes')
+five_minute_buckets=feature_column.bucketized_column(five_minute,boundaries=[5,6,7,8,9,10,11])
+feature_columns.append(five_minute_buckets)
+
+ten_minute=feature_column.numeric_column('ten_minutes')
+ten_minute_buckets=feature_column.bucketized_column(ten_minute,boundaries=[5,6,7,8,9,10,11])
+feature_columns.append(ten_minute_buckets)
+
+kg=feature_column.numeric_column('kg')
+kg_buckets=feature_column.bucketized_column(kg,boundaries=[1000,1300,1400,1600,1800,2000,2200,2400,2600,2800,3000,3500])
+feature_columns.append(kg_buckets)
+
+PH=feature_column.numeric_column('ph')
+PH_buckets=feature_column.bucketized_column(PH,boundaries=[7,7.1,7.2,7.3,7.4,7.5])
+feature_columns.append(PH_buckets)
+
+BE=feature_column.numeric_column('be')
+BE_buckets=feature_column.bucketized_column(BE,boundaries=[-8,-7,-6,-5,-4,-3,-2,-1,0])
+feature_columns.append(BE_buckets)
+
+trips=feature_column.numeric_column('trips')
+trips_buckets=feature_column.bucketized_column(trips,boundaries=[5,10,15,20,25,30,35,40])
+feature_columns.append(trips_buckets)
+
+
+
+feature_layer=tf.keras.layers.DenseFeatures(feature_columns)
+
+#网络模型——三层：输入层-特征值；隐藏层：128个神经元；输出层
+model = tf.keras.Sequential([
+    feature_layer,
+    layers.Dense(13,activation='relu'),
+    layers.Dense(1,activation='sigmoid')
+])
+
+#模型优化-梯度下降法优化，交叉熵损失函数检验
+model.compile(optimizer='adam',loss='binary_crossentropy',metrics=['accuracy'])
+
+#传入数据类型和迭代次数
+model.fit(train_ds,validation_data=val_ds,epochs=100)
+#保存模型
+
+# model.save('my_model.h5')
+# model.save_weights('my_model_weights.h5')
+
+# weight=model.get_weights()
+
+
+
+
+accuacy=model.evaluate(test_ds)
+print('Accuracy',accuacy)
+#
+# np.set_printoptions(threshold=np.inf)
+# print(weight)
